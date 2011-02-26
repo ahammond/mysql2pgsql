@@ -864,23 +864,10 @@ elsif (/^\s*insert into/i) { # not inside create table and doing insert
     # split 'extended' INSERT INTO statements to something PostgreSQL can  understand
     ( $insert_table,  $valueString) = $_ =~ m/^INSERT\s+INTO\s+['`"]*(.*?)['`"]*\s+VALUES\s*(.*)/i;
     $insert_table = quote_and_lc($insert_table);
-    # parse valueString
-    my @rows = $valueString =~ m/$rowRe/g;
 
     s/^INSERT INTO.*?\);//i;  # hose the statement which is to be replaced whether a run-on or not
-    # only convert INSERT INTO statements with multiple values
-    if (@rows > 1)
-    {
-        for my $row (@rows)
-        {
-            print OUT qq(INSERT INTO $insert_table VALUES ($row);\n);
-        }
-
-        # end command
-        print OUT  "\n";
-    } else {   # guarantee table names are quoted
-        print OUT qq(INSERT INTO $insert_table VALUES $valueString \n);
-    }
+    # guarantee table names are quoted
+    print OUT qq(INSERT INTO $insert_table VALUES $valueString \n);
 
 } else {
     print OUT $_ ;  #  example: /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;

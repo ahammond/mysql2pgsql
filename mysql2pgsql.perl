@@ -857,7 +857,7 @@ elsif (/^\s*insert into/i) { # not inside create table and doing insert
     $pre_create_sql="";
     $auto_increment_seq = "";
 
-    s/'((?:.*?(?:\\')?.*?)*)'([),])/E'$1'$2/g;
+    s/'((?:[^'\\]++|\\.)*+)'(?=[),])/E'$1'/g;
     # for the E'' see http://www.postgresql.org/docs/8.2/interactive/release-8-1.html
 
     # split 'extended' INSERT INTO statements to something PostgreSQL can  understand

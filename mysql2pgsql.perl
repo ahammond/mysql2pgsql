@@ -859,6 +859,7 @@ elsif (/^\s*insert into/i) { # not inside create table and doing insert
 
     s/'((?:[^'\\]++|\\.)*+)'(?=[),])/E'$1'/g;
     # for the E'' see http://www.postgresql.org/docs/8.2/interactive/release-8-1.html
+    s!\\\\!\\\\\\\\!g;      # replace \\ with ]\\\\
 
     # split 'extended' INSERT INTO statements to something PostgreSQL can  understand
     ( $insert_table,  $valueString) = $_ =~ m/^INSERT\s+INTO\s+['`"]*(.*?)['`"]*\s+VALUES\s*(.*)/i;

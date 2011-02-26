@@ -483,27 +483,15 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
     if (/^(\s*)(\w+)\s*.*numeric.*auto_increment/i) {         # int,auto_increment -> serial
         $seq = get_identifier($table, $2, 'seq');
         $quoted_column=quote_and_lc($2);
-        $pre_create_sql.= "DROP SEQUENCE $seq CASCADE\;\n\n";  # cascade will force drop of table, too
-        $pre_create_sql.=  "CREATE SEQUENCE $seq \;\n\n";
-        $auto_increment_seq = $seq ;  # save in case we have the AUTO_INCREMENT=16 to default to
-        #  Note:  Before PostgreSQL 8.1, the arguments of the sequence functions were of type text, not regclass,
-        # and the above-described conversion from a text string to an OID value would happen at run time during
-        # each call. For backwards compatibility, this facility still exists, but internally it is now handled
-        #  as an implicit coercion from text to regclass before the function is invoked.  (source: 8.1.3 manual, section 9.12)
-        s/^(\s*)(\w+)\s*.*NUMERIC(.*)auto_increment([^,]*)/$1 $quoted_column numeric $3 DEFAULT nextval('$seq') $4/ig;
-        #  MYSQL: data_id mediumint(8) unsigned NOT NULL auto_increment,
+        # Smash datatype to int8 and autogenerate the sequence.
+        s/^(\s*)(\w+)\s*.*NUMERIC(.*)auto_increment([^,]*)/$1 $quoted_column serial8 $4/ig;
         $create_sql.=$_;
         next;
     }
     if (/^\s*(\w+)\s+.*int.*auto_increment/i) {  #  example: data_id mediumint(8) unsigned NOT NULL auto_increment,
-        # int,auto_increment -> serial (same as what is done below)
-        # for postgres side see http://www.postgresql.org/docs/7.4/interactive/datatype.html#DATATYPE-SERIAL
         $seq = get_identifier($table, $1, 'seq');
         $quoted_column=quote_and_lc($1);
-        $pre_create_sql.= "DROP SEQUENCE $seq CASCADE \;\n\n";  # cascade will force drop of table, too
-        $auto_increment_seq=  $seq ;  # save in case we have the AUTO_INCREMENT=16 to default to
-        $pre_create_sql.=  "CREATE SEQUENCE $seq \;\n\n";
-        s/(\s*)(\w+)\s+.*int.*auto_increment[^,]*/$1 $quoted_column integer DEFAULT nextval('$seq') NOT NULL/ig;
+        s/(\s*)(\w+)\s+.*int.*auto_increment([^,]*)/$1 $quoted_column serial8 $3/ig;
         $create_sql.=$_;
         next;
     }

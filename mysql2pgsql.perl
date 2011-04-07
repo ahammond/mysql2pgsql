@@ -329,6 +329,10 @@ if (/^(UN)?LOCK TABLES/i  || /drop\s+table/i ) {
     # DROP TABLE is added when we see the CREATE TABLE
     next;
 }
+if (/^SET \@saved_cs_client/ || /^SET character_set_client = \@saved_cs_client/ || /^SET character_set_client = utf8/) {
+    # skip non-sql mysql bullshit
+    next;
+}
 if (/(create\s+table\s+)([-_\w]+)\s/i) { #  example: CREATE TABLE `english_english`
     print_post_create_sql();   # for last table
     $tables_first_timestamp_column= 1;  #  decision to print warnings about default_timestamp not being in postgres

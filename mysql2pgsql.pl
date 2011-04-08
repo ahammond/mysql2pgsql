@@ -334,7 +334,6 @@ if (/^SET \@saved_cs_client/ || /^SET character_set_client = \@saved_cs_client/ 
     next;
 }
 if (/(create\s+table\s+)([-_\w]+)\s/i) { #  example: CREATE TABLE `english_english`
-    print_post_create_sql();   # for last table
     $tables_first_timestamp_column= 1;  #  decision to print warnings about default_timestamp not being in postgres
     $create_sql = '';
     $table_no_quotes = $2 ;
@@ -748,7 +747,7 @@ update_".$table_no_quotes."();\n";
         warn "dba must do fulltext key transformation for $table\n";
         next;
     }
-    if ( /^(\s+)constraint (\S+) foreign key \((\S+)\) references (\S+) \((\S+)\)(.*)/i ) {
+    if ( /^(\s+)constraint (\S+) foreign key \(([^)]+)\) references (\S+) \(([^)]+)\)(.*)/i ) {
         $quoted_column =quote_and_lc($3);
         $col=quote_and_lc($5);
         $post_create_sql .= "ALTER TABLE $table ADD FOREIGN KEY ($quoted_column) REFERENCES " . quote_and_lc($4) . " ($col);\n";

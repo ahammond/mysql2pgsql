@@ -8,6 +8,9 @@
 # formatting are done.
 # data consistency is up to the DBA.
 #
+# 2011: changes made by Mischa Spiegelmock for improved BLOB and
+# foreign key constraint support
+#
 # (c) 2004-2007 Jose M Duarte and Joseph Speigle ... gborg
 #
 # (c) 2000-2004 Maxim Rudensky  <fonin@omnistaronline.com>
@@ -144,8 +147,6 @@ sub get_identifier($$$) {
 
 #
 #
-# called when we encounter next CREATE TABLE statement
-# also called at EOF to print out for last table
 # prints comments, indexes, foreign key constraints (the latter 2 possibly to a separate file)
 sub print_post_create_sql() {
     my ( @create_idx_comments_constraints_commandsArr, $stmts, $table_field_combination);
@@ -337,6 +338,7 @@ if (/(create\s+table\s+)([-_\w]+)\s/i) { #  example: CREATE TABLE `english_engli
     $tables_first_timestamp_column= 1;  #  decision to print warnings about default_timestamp not being in postgres
     $create_sql = '';
     $table_no_quotes = $2 ;
+    print "Dumping $table_no_quotes...\n";
     $table=quote_and_lc($2);
     if ( !$NODROP )  {  # always print drop table if user doesn't explicitly say not to
         #  to drop a table that is referenced by a view or a foreign-key constraint of another table,
@@ -383,7 +385,7 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
         # should take < ----  ) ENGINE=MyISAM AUTO_INCREMENT=16 DEFAULT CHARSET=latin1;
         # and should ouput --->  CREATE SEQUENCE "rhm_host_info_id_seq" START WITH 16;
         my $start_value = $1;
-        print $auto_increment_seq . "--\n";
+        #print $auto_increment_seq . " seq --\n";
         # print $pre_create_sql . "--\n";
         $pre_create_sql =~ s/(CREATE SEQUENCE $auto_increment_seq )/$1 START WITH $start_value /;
     }
@@ -440,7 +442,7 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
                 print OUT qq~DROP TABLE $constraint_table_name  CASCADE\\g\n~ ;
                 print OUT qq~create table $constraint_table_name  ( year_values varchar UNIQUE)\\g\n~ ;
             }
-            @column_values = split /,/, $column_valuesStr;
+            @column_values = split /,/, $column_valuesStr;  #/
             foreach $value (@column_values) {
                 print OUT qq~insert into $constraint_table_name   values (  $value  )\\g\n~; # ad ' for ints and varchars
             }
@@ -851,6 +853,9 @@ elsif (/^\s*insert into/i) { # not inside create table and doing insert
     s/'((?:[^'\\]++|\\.)*+)'(?=[),])/E'$1'/g;
     # for the E'' see http://www.postgresql.org/docs/8.2/interactive/release-8-1.html
     s!\\\\!\\\\\\\\!g;      # replace \\ with ]\\\\
+
+    # convert escaped hex BLOB data
+    s/([,\(])0x([0-9A-F]+)([,\)])/$1E'\\\\x$2'$3/g;
 
     # split 'extended' INSERT INTO statements to something PostgreSQL can  understand
     ( $insert_table,  $valueString) = $_ =~ m/^INSERT\s+INTO\s+['`"]*(.*?)['`"]*\s+VALUES\s*(.*)/i;

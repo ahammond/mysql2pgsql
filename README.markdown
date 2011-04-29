@@ -31,3 +31,5 @@ Notes:
   E'\\x1234'. Don't use BLOBs if you can avoid it in general.
 
 * If you have anything to add, please let me know
+
+* `A++ script would use again' - aesop

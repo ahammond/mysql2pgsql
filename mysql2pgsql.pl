@@ -8,6 +8,10 @@
 # formatting are done.
 # data consistency is up to the DBA.
 #
+# Modified by Robert Bruccoleri in 2013 to include skipsets, skipenum, splitinserts, and
+# doubleslash options and to remove
+# unrecognized options properly for enums, dates, and other fields with constraints.
+#
 # 2011: changes made by Mischa Spiegelmock for improved BLOB and
 # foreign key constraint support
 #
@@ -44,6 +48,8 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
+require 5.10.0;			# For ++ Regular expression operator.
+
 use Getopt::Long;
 
 use POSIX;
@@ -64,7 +70,15 @@ use warnings;
 #  1.  variable declarations
 #################################################################
 # command line options
-my( $ENC_IN, $ENC_OUT, $PRESERVE_CASE, $HELP, $DEBUG, $SCHEMA, $LOWERCASE, $CHAR2VARCHAR, $NODROP, $SEP_FILE, $opt_debug, $opt_help, $opt_schema, $opt_preserve_case, $opt_char2varchar, $opt_nodrop, $opt_sepfile, $opt_enc_in, $opt_enc_out );
+my( $ENC_IN, $ENC_OUT, $PRESERVE_CASE, $HELP, $DEBUG,
+    $SCHEMA, $LOWERCASE, $CHAR2VARCHAR, $NODROP, $SEP_FILE,
+    $SKIPSETS, $SKIPENUM, $SPLITINSERTS, $DOUBLESLASH,
+    $opt_debug, $opt_help, $opt_schema, $opt_preserve_case, $opt_char2varchar,
+    $opt_nodrop, $opt_sepfile, $opt_enc_in, $opt_enc_out );
+$SKIPSETS = 0;
+$SKIPENUM = 0;
+$SPLITINSERTS = 0;
+$DOUBLESLASH = 1;
 # variables for constructing pre-create-table entities
 my $pre_create_sql='';    # comments, 'enum' constraints preceding create table statement
 my $auto_increment_seq= '';    # so we can easily substitute it if we need a default value
@@ -122,6 +136,7 @@ sub get_identifier($$$) {
     my ($table, $col, $suffix) = @_;
     my $name = '';
     $table=~s/\"//g; # make sure that $table doesn't have quotes so we don't end up with redundant quoting
+    $col=~s/\"//g; # do same for column.
     # in the case of multiple columns
     my @cols = split(/,/,$col);
     $col =~ s/,//g;
@@ -211,7 +226,19 @@ sub quote_and_lc($)
 # 3.  get commandline options and maybe print help
 ########################################################
 
-GetOptions("help", "debug"=> \$opt_debug, "schema=s" => \$SCHEMA, "preserve_case" => \$opt_preserve_case, "char2varchar" => \$opt_char2varchar, "nodrop" => \$opt_nodrop, "sepfile=s" => \$opt_sepfile, "enc_in=s" => \$opt_enc_in, "enc_out=s" => \$opt_enc_out );
+GetOptions("help",
+	   "debug"=> \$opt_debug,
+	   "schema=s" => \$SCHEMA,
+	   "preserve_case" => \$opt_preserve_case,
+	   "char2varchar" => \$opt_char2varchar,
+	   "nodrop" => \$opt_nodrop,
+	   "sepfile=s" => \$opt_sepfile,
+	   "enc_in=s" => \$opt_enc_in,
+	   "enc_out=s" => \$opt_enc_out,
+ 	   "skipsets!" => \$SKIPSETS,
+	   "skipenum!" => \$SKIPENUM,
+	   "splitinserts!" => \$SPLITINSERTS,
+	   "doubleslash!" => \$DOUBLESLASH);
 
 $HELP = $opt_help || 0;
 $DEBUG = $opt_debug || 0;
@@ -234,6 +261,10 @@ if (($HELP) || ! defined($ARGV[0]) || ! defined($ARGV[1])) {
     print "\t\tIf your client application quotes table and column-names and they have cases in them, set this flag\n";
     print "\t--char2varchar: converts all char fields to varchar\n";
     print "\t--nodrop: strips out DROP TABLE statements\n";
+    print "\t--[no]skipsets: skip generating constraints for sets\n";
+    print "\t--[no]skipenum: skip generating constraints for enum\n";
+    print "\t--[no]splitinserts: split multi-record inserts into separate insert commands.\n";
+    print "\t--[no]doubleslash: to control the doubling of backslashes in escaped strings.\n";
     print "\t\totherise harmless warnings are printed by psql when the dropped table does not exist\n";
     print "\n\t* OPTIONS WITH ARGS\n";
     print "\t--schema: outputs a line into the postgres sql file setting search_path \n";
@@ -434,11 +465,11 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
             $type=$constraints{$column_name}{'type'};
             $column_valuesStr = $constraints{$column_name}{'values'};
             $constraint_table_name = get_identifier(${table},${column_name} ,"constraint_table");
-            if ($type eq 'set') {
+            if (lc($type) eq 'set') {
                 print OUT qq~DROP TABLE $constraint_table_name  CASCADE\\g\n~ ;
                 print OUT qq~create table $constraint_table_name  ( set_values varchar UNIQUE)\\g\n~ ;
                 $function_create_sql .= make_plpgsql($table,$column_name);
-            } elsif ($type eq 'year')  {
+            } elsif (lc($type) eq 'year')  {
                 print OUT qq~DROP TABLE $constraint_table_name  CASCADE\\g\n~ ;
                 print OUT qq~create table $constraint_table_name  ( year_values varchar UNIQUE)\\g\n~ ;
             }
@@ -559,6 +590,14 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
     # longtext
     #  mysql docs: A BLOB is a binary large object that can hold a variable amount of data.
 
+    # Change location because the enum test can leave a collation around.
+
+    # nuke column's collate and character set
+    s/(\S+)\s+character\s+set\s+\w+/$1/gi;
+    s/(\S+)\s+collate\s+\w+/$1/gi;
+    # Likewise to zerofill.
+    s/(\S+)\s+zerofill\s+\w+/$1/gi;
+
     # set
     # For example, a column specified as SET('one', 'two') NOT NULL can have any of these values:
     # ''
@@ -567,9 +606,11 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
     # 'one,two'
     if (/(\w*)\s+set\(((?:['"]\w+['"]\s*,*)+(?:['"]\w+['"])*)\)(.*)$/i) { # example:  `au_auth` set('r','w','d') NOT NULL default '',
         $column_name = $1;
-        $constraints{$column_name}{'values'} = $2;  # 'abc','def', ...
-        $constraints{$column_name}{'type'} = "set";  # 'abc','def', ...
-        $_ =  qq~ $column_name varchar , ~;
+        unless ($SKIPSETS) {
+	    $constraints{$column_name}{'values'} = $2;  # 'abc','def', ...
+	    $constraints{$column_name}{'type'} = "set";  # 'abc','def', ...
+	}
+        $_ =  qq~ $column_name varchar , \n~;
         $column_name = quote_and_lc($1);
         $create_sql.=$_;
         next;
@@ -580,7 +621,12 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
         # $2  is the values of the enum 'abc','def', ...
         $quoted_column=quote_and_lc($1);
         #  "test" NOT NULL default '?' CONSTRAINT test_test_constraint CHECK ("test" IN ('?','+','-'))
-        $_ = qq~ $quoted_column varchar CHECK ($quoted_column IN ( $2 ))$3\n~;  # just assume varchar?
+        if ($SKIPENUM) {
+            $_ = qq~ $quoted_column text, \n~;
+        }
+        else {
+	    $_ = qq~ $quoted_column varchar CHECK ($quoted_column IN ( $2 ))$3\n~;  # just assume varchar?
+	}
         $create_sql.=$_;
         next;
     }
@@ -607,9 +653,6 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
         s/(^\s+\S+\s+)char/${1}varchar/gi;
     }
 
-    # nuke column's collate and character set
-    s/(\S+)\s+character\s+set\s+\w+/$1/gi;
-    s/(\S+)\s+collate\s+\w+/$1/gi;
 
     #
     # DATE AND TIME TYPES
@@ -644,13 +687,14 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
         @year_holder = ();
         $year='';
         for (1901 .. 2155) {
-                $year = "'$_'";
-            unless ($year =~ /2155/) { $year .= ','; }
-             push( @year_holder, $year);
+	    $year = "'$_'";
+	    unless ($year =~ /2155/) { $year .= ','; }
+	    push( @year_holder, $year);
         }
         $constraints{$column_name}{'values'} = join('','',@year_holder);   # '1901','1902', ...
         $constraints{$column_name}{'type'} = "year";
-        $_ =  qq~ $column_name varchar CONSTRAINT ${table}_${column_name}_constraint REFERENCES $constraint_table_name ("year_values") $2\n~;
+	my $constraint_name = &get_identifier($table, $column_name, "constraint");
+	$_ =  qq~ $column_name varchar CONSTRAINT ${constraint_name} REFERENCES $constraint_table_name ("year_values") $2\n~;
         $create_sql.=$_;
         next;
     } elsif (/(\w*)\s+year\(2\)(.*)$/i) { # same for a 2-integer string
@@ -666,7 +710,8 @@ if ($create_sql ne "") {         # we are inside create table statement so lets 
         push( @year_holder, '0000');
         $constraints{$column_name}{'values'} = join(',',@year_holder);   # '1971','1972', ...
         $constraints{$column_name}{'type'} = "year";  # 'abc','def', ...
-        $_ =  qq~ $1 varchar CONSTRAINT ${table}_${column_name}_constraint REFERENCES $constraint_table_name ("year_values") $2\n~;
+	my $constraint_name = &get_identifier($table, $column_name, "constraint");
+        $_ =  qq~ $1 varchar CONSTRAINT ${constraint_name} REFERENCES $constraint_table_name ("year_values") $2\n~;
         $create_sql.=$_;
         next;
     }
@@ -852,7 +897,9 @@ elsif (/^\s*insert into/i) { # not inside create table and doing insert
 
     s/'((?:[^'\\]++|\\.)*+)'(?=[),])/E'$1'/g;
     # for the E'' see http://www.postgresql.org/docs/8.2/interactive/release-8-1.html
-    s!\\\\!\\\\\\\\!g;      # replace \\ with ]\\\\
+    if ($DOUBLESLASH) {
+	s!\\\\!\\\\\\\\!g;      # replace \\ with ]\\\\
+    }
 
     # convert escaped hex BLOB data
     s/([,\(])0x([0-9A-F]+)([,\)])/$1E'\\\\x$2'$3/g;
@@ -860,11 +907,24 @@ elsif (/^\s*insert into/i) { # not inside create table and doing insert
     # split 'extended' INSERT INTO statements to something PostgreSQL can  understand
     ( $insert_table,  $valueString) = $_ =~ m/^INSERT\s+INTO\s+['`"]*(.*?)['`"]*\s+VALUES\s*(.*)/i;
     $insert_table = quote_and_lc($insert_table);
-
     s/^INSERT INTO.*?\);//i;  # hose the statement which is to be replaced whether a run-on or not
-    # guarantee table names are quoted
-    print OUT qq(INSERT INTO $insert_table VALUES $valueString \n);
-
+    if ($SPLITINSERTS) {
+	my @rows = $valueString =~ m/$rowRe/g;
+	
+	if (@rows > 1) {
+	    for my $row (@rows) {
+		print OUT qq(INSERT INTO $insert_table VALUES ($row);\n);
+	    }
+	    # end command
+	    print OUT  "\n";
+	}
+	else {
+	    print OUT qq(INSERT INTO $insert_table VALUES $valueString \n);
+	}
+    }
+    else {   # guarantee table names are quoted
+        print OUT qq(INSERT INTO $insert_table VALUES $valueString \n);
+    }
 } else {
     print OUT $_ ;  #  example: /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 }

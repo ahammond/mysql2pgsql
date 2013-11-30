@@ -48,7 +48,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
-require 5.10.0;			# For ++ Regular expression operator.
+use 5.10.0;			# For ++ Regular expression operator.
 
 use Getopt::Long;
 

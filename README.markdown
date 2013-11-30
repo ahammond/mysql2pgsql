@@ -30,4 +30,7 @@ Notes:
 * Dumps do not work well with BLOB data. MySQL uses 0x1234, Pg uses
   E'\\x1234'. Don't use BLOBs if you can avoid it in general.
 
+* The test directory contains some simple tests, which are not comprehensive.
+  cd test; ./run_test.sh to run the tests. 
+
 * If you have anything to add, please let me know

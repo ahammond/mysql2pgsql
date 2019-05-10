@@ -18,7 +18,7 @@ file) and FKs with multiple column references.
 Make sure you have created the database first.
 
 > `psql -f dbname_pg.sql`
-> `psql -f constraints.sql
+> `psql -f constraints.sql、
 
 Notes:
 ------
